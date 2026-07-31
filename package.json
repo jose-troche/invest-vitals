@@ -1,0 +1,27 @@
+{
+  "name": "invest-vitals",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@invest-vitals/worker",
+    "dev:web": "npm run dev --workspace=@invest-vitals/web",
+    "build": "npm run build --workspace=@invest-vitals/web && npm run build --workspace=@invest-vitals/worker",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "check": "npm run typecheck && npm test && npm run build",
+    "cf-types": "npm run cf-types --workspace=@invest-vitals/worker",
+    "deploy:dry": "npm run build && npm run deploy:dry --workspace=@invest-vitals/worker",
+    "deploy": "npm run build && npm run deploy --workspace=@invest-vitals/worker"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Invest Vitals</title>
+  <rect width="64" height="64" rx="15" fill="#243b30"/>
+  <path d="M15 48V36M30 48V29M45 48V20" stroke="#486454" stroke-width="7" stroke-linecap="round"/>
+  <path d="M9 36h11l5-11 8 23 7-17 5 5h10" fill="none" stroke="#dcebdd" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="55" cy="36" r="2.5" fill="#8fc39b"/>
+</svg>
