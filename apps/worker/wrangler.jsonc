@@ -14,12 +14,14 @@
     {
       "binding": "DB",
       "database_name": "invest-vitals-db",
-      "migrations_dir": "migrations"
+      "migrations_dir": "migrations",
+      "database_id": "8c41748f-1604-48da-b7c2-8d0301514c7d"
     }
   ],
   "kv_namespaces": [
     {
-      "binding": "CACHE"
+      "binding": "CACHE",
+      "id": "172c21756f794e2cb8483e9a8cab441d"
     }
   ],
   "triggers": {
