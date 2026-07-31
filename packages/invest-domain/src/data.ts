@@ -138,6 +138,13 @@ export const dashboardData: DashboardData = {
   alerts,
   generatedAt: new Date().toISOString(),
   dataMode: "illustrative",
+  marketData: {
+    source: "Invest Vitals baseline dataset",
+    status: "fallback",
+    asOf: new Date().toISOString(),
+    fetchedAt: new Date().toISOString(),
+    note: "Illustrative baseline used when live market data is unavailable.",
+  },
 };
 
 export function findCompany(symbol: string): Company | undefined {

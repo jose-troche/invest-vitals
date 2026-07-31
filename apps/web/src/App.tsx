@@ -8,13 +8,14 @@ import {
 } from "lucide-react";
 import { useEffect, useId, useMemo, useState, type AnchorHTMLAttributes, type MouseEventHandler, type ReactNode } from "react";
 import { Link as WouterLink, Redirect, Route, Switch, useLocation, useRoute } from "wouter";
-import { askAssistant, compareCompanies, getCompany, getDashboard } from "./lib/api";
+import { askAssistant, compareCompanies, getCompany, getDashboard, getWatchlistQuotes, searchSymbols } from "./lib/api";
 import { useWatchlist } from "./hooks/use-watchlist";
 import { AnnualReturns, HealthRing, Sparkline } from "./components/charts";
 import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
 import { Card } from "./components/ui/card";
 import { cn } from "./lib/cn";
+import { formatMarketTime, formatToday, getGreeting } from "./lib/greeting";
 
 const navItems = [
   { to: "/", label: "Overview", icon: LayoutDashboard },
@@ -207,9 +208,11 @@ function DashboardPage() {
   const { data, isLoading } = useQuery({ queryKey: ["dashboard"], queryFn: getDashboard });
   if (isLoading || !data) return <PageSkeleton />;
   const { portfolio, companies, alerts } = data;
+  const configuredName = import.meta.env.VITE_USER_NAME?.trim();
+  const marketLabel = data.dataMode === "illustrative" ? "Illustrative fallback" : data.marketData.status === "fallback" ? "Partial market data" : data.marketData.status === "cached" ? "Cached market data" : "Fresh market data";
   return (
     <div className="page dashboard-page">
-      <PageHeading eyebrow="Friday, July 31" title="Good morning, José." description="Your portfolio is healthy overall. Two changes deserve a closer look." actions={<><Badge className="data-badge"><Info size={13} /> Illustrative data</Badge><Button asChild><Link to="/assistant"><Sparkles size={16} /> Ask Vitals</Link></Button></>} />
+      <PageHeading eyebrow={formatToday()} title={getGreeting(new Date(), configuredName)} description="Track market movement alongside your baseline fundamentals and investment thesis." actions={<><Badge className="data-badge" title={data.marketData.note}><Info size={13} /> {marketLabel}</Badge><Button asChild><Link to="/assistant"><Sparkles size={16} /> Ask Vitals</Link></Button></>} />
       <section className="portfolio-hero">
         <div className="portfolio-total"><span>Portfolio value</span><strong>{formatCurrency(portfolio.totalValue)}</strong><p className="text-positive"><TrendingUp size={16} /> {formatCurrency(portfolio.dayChangeValue)} ({portfolio.dayChangePct}%) today</p></div>
         <div className="portfolio-periods">{Object.entries(portfolio.periodReturns).map(([period, value]) => <div key={period}><span>{period}</span><strong className={value >= 0 ? "text-positive" : "text-negative"}>{value >= 0 ? "+" : ""}{value}%</strong></div>)}</div>
@@ -219,7 +222,7 @@ function DashboardPage() {
         <SummaryCard label="Avg. momentum" value={`${portfolio.averageMomentum}/100`} detail="Positive across 3 holdings" tone="positive" icon={<Activity size={17} />} />
         <SummaryCard label="Portfolio risk" value={portfolio.risk} detail="Concentration is the main risk" icon={<ShieldCheck size={17} />} />
         <SummaryCard label="Diversification" value={`${portfolio.diversification}/100`} detail="Technology exposure is elevated" icon={<BriefcaseBusiness size={17} />} />
-        <SummaryCard label="Range this month" value="META → AAPL" detail="+4.7% best · −4.2% worst" icon={<TrendingUp size={17} />} />
+        <SummaryCard label="Range this month" value={`${portfolio.largestWinner.split(" ")[0]} → ${portfolio.largestLoser.split(" ")[0]}`} detail={`${portfolio.largestWinner} best · ${portfolio.largestLoser} worst`} icon={<TrendingUp size={17} />} />
       </section>
       <section className="attention-card">
         <div className="attention-icon"><CircleAlert size={21} /></div>
@@ -227,7 +230,7 @@ function DashboardPage() {
         <Button asChild variant="secondary"><Link to="/alerts">Review changes <ArrowRight size={15} /></Link></Button>
       </section>
       <section className="section-block">
-        <div className="section-heading"><div><p className="eyebrow">Your holdings</p><h2>Portfolio health</h2></div><div className="section-note"><Clock3 size={14} /> Refreshed {companies[0]?.updatedAt}</div></div>
+        <div className="section-heading"><div><p className="eyebrow">Your holdings</p><h2>Portfolio health</h2></div><div className="section-note"><Clock3 size={14} /> Market as of {formatMarketTime(data.marketData.asOf)}</div></div>
         <HoldingsTable companies={companies} />
       </section>
       <section className="lower-grid">
@@ -306,7 +309,7 @@ function CompanyPage() {
         <Card className="key-change-card"><span className="eyebrow">What changed</span><h2>{company.keyChange}</h2><p>Updated {company.updatedAt} · Evidence from fundamentals, price trend, and recent company updates.</p></Card>
         <Card className="thesis-mini"><span className="eyebrow">Thesis check</span><div className={cn("thesis-state", company.status === "Needs review" && "thesis-state-warn")}><CircleCheck size={19} /><strong>{company.thesisStatus}</strong></div><Link to="#thesis">Review thesis <ArrowRight size={14} /></Link></Card>
       </section>
-      <section className="section-block"><div className="section-heading"><div><p className="eyebrow">Performance</p><h2>Returns at a glance</h2></div><span className="section-note">No price prediction · total return, illustrative</span></div><div className="performance-grid">{company.performance.map((period) => <Card className="performance-card" key={period.shortLabel}><span>{period.label}</span><strong className={period.returnPct >= 0 ? "text-positive" : "text-negative"}>{period.returnPct > 0 ? "+" : ""}{period.returnPct}%</strong><Sparkline values={period.sparkline} positive={period.returnPct >= 0} width={132} /></Card>)}</div></section>
+      <section className="section-block"><div className="section-heading"><div><p className="eyebrow">Performance</p><h2>Returns at a glance</h2></div><span className="section-note">No price prediction · {company.marketData ? `${company.marketData.status} market history` : "illustrative fallback"}</span></div><div className="performance-grid">{company.performance.map((period) => <Card className="performance-card" key={period.shortLabel}><span>{period.label}</span><strong className={period.returnPct >= 0 ? "text-positive" : "text-negative"}>{period.returnPct > 0 ? "+" : ""}{period.returnPct}%</strong><Sparkline values={period.sparkline} positive={period.returnPct >= 0} width={132} /></Card>)}</div></section>
       <section className="detail-two-column">
         <Card className="momentum-card"><div className="section-heading compact"><div><p className="eyebrow">Momentum</p><h2>{company.momentum}</h2></div><span className={cn("momentum-score", `momentum-${company.momentumDirection}`)}><DirectionIcon direction={company.momentumDirection} />{company.momentumScore}/100</span></div><p>{company.momentumExplanation}</p><div className="momentum-periods">{company.performance.slice(0, 4).map((period) => <div key={period.shortLabel}><span>{period.shortLabel}</span><i className={period.returnPct >= 0 ? "positive-bar" : "negative-bar"} style={{ width: `${Math.max(12, Math.min(100, Math.abs(period.returnPct) * 4))}%` }} /><strong className={period.returnPct >= 0 ? "text-positive" : "text-negative"}>{period.returnPct > 0 ? "+" : ""}{period.returnPct}%</strong></div>)}</div></Card>
         <Card className="annual-card"><div className="section-heading compact"><div><p className="eyebrow">Annual returns</p><h2>Calendar years</h2></div></div><AnnualReturns returns={company.annualReturns} /></Card>
@@ -326,16 +329,33 @@ function CompanyPage() {
 }
 
 function WatchlistPage() {
-  const { data } = useQuery({ queryKey: ["dashboard"], queryFn: getDashboard });
   const { symbols, addSymbol, removeSymbol } = useWatchlist();
   const [query, setQuery] = useState("");
-  const matches = (data?.companies ?? []).filter((company) => !symbols.includes(company.symbol) && (`${company.symbol} ${company.name}`).toLowerCase().includes(query.toLowerCase()));
-  const watched = symbols.map((symbol) => data?.companies.find((company) => company.symbol === symbol)).filter((company): company is Company => Boolean(company));
+  const [searchQuery, setSearchQuery] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearchQuery(query.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+  const { data: watchlist, isLoading: watchlistLoading } = useQuery({
+    queryKey: ["watchlist-quotes", symbols.join(",")],
+    queryFn: () => getWatchlistQuotes(symbols),
+    enabled: symbols.length > 0,
+    refetchInterval: 5 * 60 * 1000,
+  });
+  const { data: search, isFetching: searchLoading } = useQuery({
+    queryKey: ["symbol-search", searchQuery],
+    queryFn: () => searchSymbols(searchQuery),
+    enabled: searchQuery.length > 0,
+    staleTime: 30 * 60 * 1000,
+  });
+  const matches = (search?.results ?? []).filter((result) => !symbols.includes(result.symbol));
+  const watched = watchlist?.quotes ?? [];
   return (
     <div className="page watchlist-page">
-      <PageHeading eyebrow="Local watchlist" title="Companies on your radar" description="Your watchlist stays in this browser. Sign-in and cloud sync can be added later." actions={<Badge className="data-badge"><ShieldCheck size={13} /> Stored locally</Badge>} />
-      <Card className="watchlist-search"><Search size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search a ticker or company" aria-label="Search companies" />{query && <button onClick={() => setQuery("")} aria-label="Clear search"><X size={17} /></button>}{query && <div className="search-results">{matches.length > 0 ? matches.map((company) => <button key={company.symbol} onClick={() => { addSymbol(company.symbol); setQuery(""); }}><span className="company-logo" style={{ background: company.accent }}>{company.symbol[0]}</span><span><strong>{company.symbol}</strong><small>{company.name}</small></span><Plus size={17} /></button>) : <p>No additional company in the demo catalog matches “{query}”.</p>}</div>}</Card>
-      {watched.length === 0 ? <Card className="empty-state"><span><Star size={28} /></span><h2>Your watchlist is empty</h2><p>Search for a company above to monitor its health without adding it to your portfolio.</p></Card> : <div className="watchlist-grid">{watched.map((company) => <Card className="watch-card" key={company.symbol}><div className="watch-card-head"><div className="company-cell"><span className="company-logo" style={{ background: company.accent }}>{company.symbol[0]}</span><div><strong>{company.symbol}</strong><small>{company.name}</small></div></div><button onClick={() => removeSymbol(company.symbol)} aria-label={`Remove ${company.symbol} from watchlist`}><X size={17} /></button></div><div className="watch-health"><HealthRing score={company.health} size={86} /><div><span>Health</span><strong>{company.healthLabel}</strong><small className={company.healthDelta >= 0 ? "text-positive" : "text-negative"}>{company.healthDelta >= 0 ? "+" : ""}{company.healthDelta} points</small></div></div><p className="watch-change"><span>What changed</span>{company.keyChange}</p><div className="watch-card-foot"><span className={cn("momentum-label", `momentum-${company.momentumDirection}`)}><DirectionIcon direction={company.momentumDirection} />{company.momentum}</span><Button asChild variant="ghost" size="sm"><Link to={`/company/${company.symbol}`}>Open <ArrowRight size={14} /></Link></Button></div></Card>)}</div>}
+      <PageHeading eyebrow="Local watchlist" title="Companies on your radar" description="Search any supported ticker, then select it to add. Symbols stay in this browser; quotes refresh from the market-data provider." actions={<Badge className="data-badge"><ShieldCheck size={13} /> Stored locally</Badge>} />
+      <Card className="watchlist-search"><Search size={19} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search a ticker or company (for example, NVDA)" aria-label="Search companies" />{query && <button onClick={() => setQuery("")} aria-label="Clear search"><X size={17} /></button>}{query && <div className="search-results">{searchLoading ? <p>Searching market symbols…</p> : matches.length > 0 ? matches.map((result) => <button key={result.symbol} onClick={() => { addSymbol(result.symbol); setQuery(""); }}><span className="company-logo">{result.symbol[0]}</span><span><strong>{result.symbol}</strong><small>{result.name} · {result.exchange}</small></span><Plus size={17} /></button>) : <p>No supported ticker matches “{query}”.</p>}</div>}</Card>
+      {watchlistLoading ? <PageSkeleton compact /> : watched.length === 0 ? <Card className="empty-state"><span><Star size={28} /></span><h2>Your watchlist is empty</h2><p>Type a ticker or company above, then choose a search result to add it.</p></Card> : <div className="watchlist-grid">{watched.map((quote) => { const score = quote.health ?? quote.momentumScore; return <Card className="watch-card" key={quote.symbol}><div className="watch-card-head"><div className="company-cell"><span className="company-logo" style={{ background: quote.accent }}>{quote.symbol[0]}</span><div><strong>{quote.symbol}</strong><small>{quote.name}</small></div></div><button onClick={() => removeSymbol(quote.symbol)} aria-label={`Remove ${quote.symbol} from watchlist`}><X size={17} /></button></div><div className="watch-price"><strong>{formatCurrency(quote.price)}</strong><span className={quote.dayChangePct >= 0 ? "text-positive" : "text-negative"}>{quote.dayChangePct >= 0 ? "+" : ""}{quote.dayChangePct}% today</span></div><div className="watch-health"><HealthRing score={score} size={86} /><div><span>{quote.health !== undefined ? "Health" : "Market trend"}</span><strong>{quote.healthLabel ?? quote.momentum}</strong>{quote.healthDelta !== undefined ? <small className={quote.healthDelta >= 0 ? "text-positive" : "text-negative"}>{quote.healthDelta >= 0 ? "+" : ""}{quote.healthDelta} points</small> : <small>{score}/100 momentum</small>}</div></div><p className="watch-change"><span>Latest context</span>{quote.keyChange}</p><small className="watch-asof">As of {formatMarketTime(quote.marketData.asOf)} · {quote.marketData.status}</small><div className="watch-card-foot"><span className={cn("momentum-label", `momentum-${quote.momentumDirection}`)}><DirectionIcon direction={quote.momentumDirection} />{quote.momentum}</span>{quote.hasCompanyDetails ? <Button asChild variant="ghost" size="sm"><Link to={`/company/${quote.symbol}`}>Open <ArrowRight size={14} /></Link></Button> : <Badge>Market data only</Badge>}</div></Card>; })}</div>}
+      {watchlist?.unavailable.length ? <p className="watchlist-warning">Quotes temporarily unavailable for: {watchlist.unavailable.join(", ")}.</p> : null}
       <Disclaimer />
     </div>
   );
@@ -469,7 +489,7 @@ function AssistantPage() {
 }
 
 function Disclaimer() {
-  return <p className="disclaimer"><Info size={13} /> Invest Vitals is an educational decision-support tool, not financial advice. Current v1 data is illustrative and clearly labeled.</p>;
+  return <p className="disclaimer"><Info size={13} /> Invest Vitals is an educational decision-support tool, not financial advice. Market prices and returns may be live or cached; fundamentals, valuation, thesis, and news remain baseline data unless labeled otherwise.</p>;
 }
 
 function PageSkeleton({ compact = false }: { compact?: boolean }) {

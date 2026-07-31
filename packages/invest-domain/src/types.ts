@@ -1,6 +1,7 @@
 export type Signal = "positive" | "neutral" | "negative";
 export type HealthLabel = "Excellent" | "Healthy" | "Watch" | "Needs review";
 export type MomentumLabel = "Strong uptrend" | "Uptrend" | "Flat" | "Weak" | "Downtrend" | "Recovering";
+export type DataMode = "live" | "mixed" | "illustrative";
 
 export interface PerformancePeriod {
   label: string;
@@ -74,6 +75,59 @@ export interface Company {
   thesis: string[];
   thesisStatus: string;
   news: NewsItem[];
+  marketData?: MarketDataStatus;
+}
+
+export interface MarketDataStatus {
+  source: string;
+  status: "live" | "cached" | "fallback";
+  asOf: string;
+  fetchedAt: string;
+  note: string;
+}
+
+export interface MarketSnapshot {
+  symbol: string;
+  name: string;
+  exchange: string;
+  currency: string;
+  price: number;
+  previousClose: number;
+  dayChangePct: number;
+  marketTime: string;
+  performance: PerformancePeriod[];
+  annualReturns: AnnualReturn[];
+  momentumScore: number;
+  momentum: MomentumLabel;
+  momentumDirection: "up" | "flat" | "down";
+  marketData: MarketDataStatus;
+}
+
+export interface WatchlistQuote extends MarketSnapshot {
+  accent: string;
+  health?: number;
+  healthLabel?: HealthLabel;
+  healthDelta?: number;
+  keyChange: string;
+  hasCompanyDetails: boolean;
+}
+
+export interface SymbolSearchResult {
+  symbol: string;
+  name: string;
+  exchange: string;
+  type: string;
+}
+
+export interface WatchlistResponse {
+  quotes: WatchlistQuote[];
+  unavailable: string[];
+  dataMode: DataMode;
+}
+
+export interface SymbolSearchResponse {
+  results: SymbolSearchResult[];
+  source: string;
 }
 
 export interface PortfolioSummary {
@@ -106,7 +160,8 @@ export interface DashboardData {
   companies: Company[];
   alerts: AlertItem[];
   generatedAt: string;
-  dataMode: "illustrative" | "live";
+  dataMode: DataMode;
+  marketData: MarketDataStatus;
 }
 
 export interface ComparisonRow {

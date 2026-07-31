@@ -15,6 +15,14 @@ describe("Invest Vitals API", () => {
     expect((await app.request("/api/companies/NOPE")).status).toBe(404);
   });
 
+  it("returns the local watchlist contract without a provider binding", async () => {
+    const response = await app.request("/api/watchlist?symbols=MSFT,NOPE");
+    const body = await response.json() as { quotes: Array<{ symbol: string }>; unavailable: string[] };
+    expect(response.status).toBe(200);
+    expect(body.quotes.map((quote) => quote.symbol)).toEqual(["MSFT"]);
+    expect(body.unavailable).toEqual(["NOPE"]);
+  });
+
   it("answers assistant questions deterministically", async () => {
     const response = await app.request("/api/assistant", {
       method: "POST",

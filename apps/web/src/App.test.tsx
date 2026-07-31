@@ -26,7 +26,8 @@ describe("application shell", () => {
     expect(markup).toContain("Invest Vitals");
     expect(markup).toContain("Watchlist");
     expect(markup).toContain("Ask Vitals");
-    expect(markup).toContain("Good morning");
+    expect(markup).toMatch(/Good (morning|afternoon|evening)\./);
+    expect(markup).not.toContain("José");
   });
 
   it.each([

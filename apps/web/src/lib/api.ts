@@ -1,4 +1,4 @@
-import { dashboardData, findCompany, type AssistantAnswer, type Company, type ComparisonResult, type DashboardData } from "@invest-vitals/domain";
+import { dashboardData, findCompany, type AssistantAnswer, type Company, type ComparisonResult, type DashboardData, type SymbolSearchResponse, type WatchlistResponse } from "@invest-vitals/domain";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, init);
@@ -34,4 +34,13 @@ export async function askAssistant(question: string): Promise<AssistantAnswer> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ question }),
   });
+}
+
+export async function searchSymbols(query: string): Promise<SymbolSearchResponse> {
+  return request<SymbolSearchResponse>(`/search?q=${encodeURIComponent(query)}`);
+}
+
+export async function getWatchlistQuotes(symbols: string[]): Promise<WatchlistResponse> {
+  if (symbols.length === 0) return { quotes: [], unavailable: [], dataMode: "mixed" };
+  return request<WatchlistResponse>(`/watchlist?symbols=${encodeURIComponent(symbols.join(","))}`);
 }
