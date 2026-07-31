@@ -1,0 +1,6 @@
+# Optional primary evidence provider. Obtain a key from Alpha Vantage.
+ALPHA_VANTAGE_API_KEY=
+
+# Required by SEC fair-access policy when enabling EDGAR ingestion.
+# Use an honest application identifier and monitored contact email.
+SEC_USER_AGENT=InvestVitals/1.0 your-email@example.com

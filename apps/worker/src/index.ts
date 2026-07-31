@@ -1,8 +1,12 @@
-import { companies, dashboardData, findCompany, type Company, type ComparisonResult, type WatchlistResponse } from "@invest-vitals/domain";
+import { companies, dashboardData, findCompany, type AlertItem, type AlertTransition, type Company, type CompanyEvidence, type ComparisonResult, type MarketSnapshot, type WatchlistResponse } from "@invest-vitals/domain";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { answerQuestion } from "./assistant";
+import { applyEvidence } from "./evidence-enrichment";
+import { AlphaVantageProvider, loadCompanyEvidence, SecEdgarProvider, type CompanyEvidenceProvider } from "./evidence-provider";
 import { createDashboard, enrichCompany, getMarketSnapshot, searchMarket, toWatchlistQuote } from "./market-provider";
+import { loadCompanyHistory, loadLatestEvidence, loadRecentTransitions, persistRefresh } from "./persistence";
+import { answerWithWorkersAi } from "./workers-ai";
 
 type Bindings = Env;
 type AppVariables = { requestId: string };
@@ -24,6 +28,11 @@ app.get("/health", (context) => context.json({
   service: "invest-vitals",
   dataMode: context.env?.CACHE ? "mixed" : "illustrative",
   marketProvider: "Yahoo Finance chart API (unofficial)",
+  primaryEvidence: {
+    alphaVantage: Boolean(optionalBinding(context.env, "ALPHA_VANTAGE_API_KEY")),
+    secEdgar: Boolean(optionalBinding(context.env, "SEC_USER_AGENT")),
+  },
+  workersAi: Boolean(context.env?.AI),
   requestId: context.get("requestId"),
 }));
 
@@ -31,26 +40,86 @@ function backgroundWriter(context: { executionCtx: { waitUntil(promise: Promise<
   return (promise: Promise<unknown>) => context.executionCtx.waitUntil(promise);
 }
 
-async function enrichKnownCompanies(cache: KVNamespace, write: (promise: Promise<unknown>) => void): Promise<Company[]> {
+function optionalBinding(env: Env | undefined, name: string): string | undefined {
+  if (!env) return undefined;
+  const value = Reflect.get(env, name);
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function evidenceProviders(env: Env, write: (promise: Promise<unknown>) => void): CompanyEvidenceProvider[] {
+  const providers: CompanyEvidenceProvider[] = [];
+  const alphaKey = optionalBinding(env, "ALPHA_VANTAGE_API_KEY");
+  const secUserAgent = optionalBinding(env, "SEC_USER_AGENT");
+  if (alphaKey) providers.push(new AlphaVantageProvider(alphaKey, env.CACHE, write));
+  if (secUserAgent) providers.push(new SecEdgarProvider(secUserAgent, env.CACHE, write));
+  return providers;
+}
+
+function mergeEvidence(stored: CompanyEvidence, refreshed: CompanyEvidence): CompanyEvidence {
+  return {
+    symbol: refreshed.symbol,
+    fundamentals: refreshed.fundamentals ?? stored.fundamentals,
+    earnings: refreshed.earnings.length > 0 ? refreshed.earnings : stored.earnings,
+    filings: refreshed.filings.length > 0 ? refreshed.filings : stored.filings,
+    news: refreshed.news.length > 0 ? refreshed.news : stored.news,
+  };
+}
+
+function transitionToAlert(transition: AlertTransition, sourceCompanies: Company[]): AlertItem {
+  return {
+    id: transition.id,
+    symbol: transition.symbol,
+    company: sourceCompanies.find((company) => company.symbol === transition.symbol)?.name ?? transition.symbol,
+    severity: transition.severity,
+    title: transition.title,
+    reason: transition.reason,
+    scoreChange: transition.previousValue ? `${transition.previousValue} → ${transition.currentValue}` : undefined,
+    time: transition.createdAt,
+    read: false,
+  };
+}
+
+async function storedEvidence(db: D1Database, symbol: string): Promise<CompanyEvidence> {
+  try {
+    return await loadLatestEvidence(db, symbol);
+  } catch (error) {
+    console.warn(JSON.stringify({ event: "evidence_history_unavailable", symbol, error: String(error) }));
+    return { symbol, earnings: [], filings: [], news: [] };
+  }
+}
+
+interface EnrichedCompanyResult { company: Company; market?: MarketSnapshot; evidence: CompanyEvidence }
+
+async function enrichKnownCompanies(env: Env, write: (promise: Promise<unknown>) => void): Promise<EnrichedCompanyResult[]> {
   return Promise.all(companies.map(async (company) => {
+    const evidence = await storedEvidence(env.DB, company.symbol);
     try {
-      return enrichCompany(company, await getMarketSnapshot(cache, company.symbol, write));
+      const market = await getMarketSnapshot(env.CACHE, company.symbol, write);
+      return { company: applyEvidence(enrichCompany(company, market), evidence), market, evidence };
     } catch (error) {
       console.warn(JSON.stringify({ event: "market_data_fallback", symbol: company.symbol, error: String(error) }));
-      return company;
+      return { company: applyEvidence(company, evidence), evidence };
     }
   }));
 }
 
 app.get("/dashboard", async (context) => {
   if (!context.env?.CACHE) return context.json(dashboardData);
-  const enriched = await enrichKnownCompanies(context.env.CACHE, backgroundWriter(context));
-  return context.json(createDashboard(dashboardData, enriched));
+  const enriched = await enrichKnownCompanies(context.env, backgroundWriter(context));
+  const dashboard = createDashboard(dashboardData, enriched.map((item) => item.company));
+  try {
+    const transitions = await loadRecentTransitions(context.env.DB, 10);
+    if (transitions.length > 0) dashboard.alerts = transitions.map((transition) => transitionToAlert(transition, dashboard.companies));
+  } catch (error) {
+    console.warn(JSON.stringify({ event: "alert_history_unavailable", error: String(error) }));
+  }
+  return context.json(dashboard);
 });
 
 app.get("/companies", async (context) => {
   if (!context.env?.CACHE) return context.json({ companies, dataMode: "illustrative" });
-  return context.json({ companies: await enrichKnownCompanies(context.env.CACHE, backgroundWriter(context)), dataMode: "mixed" });
+  const enriched = await enrichKnownCompanies(context.env, backgroundWriter(context));
+  return context.json({ companies: enriched.map((item) => item.company), dataMode: "mixed" });
 });
 
 app.get("/companies/:symbol", async (context) => {
@@ -59,7 +128,8 @@ app.get("/companies/:symbol", async (context) => {
   if (!context.env?.CACHE) return context.json(company);
   try {
     const snapshot = await getMarketSnapshot(context.env.CACHE, company.symbol, backgroundWriter(context));
-    return context.json(enrichCompany(company, snapshot));
+    const evidence = await storedEvidence(context.env.DB, company.symbol);
+    return context.json(applyEvidence(enrichCompany(company, snapshot), evidence));
   } catch (error) {
     console.warn(JSON.stringify({ event: "market_data_fallback", symbol: company.symbol, error: String(error) }));
     return context.json(company);
@@ -75,7 +145,8 @@ app.get("/compare", async (context) => {
   const selected = context.env?.CACHE
     ? await Promise.all(baseline.map(async (company) => {
       try {
-        return enrichCompany(company, await getMarketSnapshot(context.env.CACHE, company.symbol, backgroundWriter(context)));
+        const market = await getMarketSnapshot(context.env.CACHE, company.symbol, backgroundWriter(context));
+        return applyEvidence(enrichCompany(company, market), await storedEvidence(context.env.DB, company.symbol));
       } catch {
         return company;
       }
@@ -100,6 +171,29 @@ app.get("/compare", async (context) => {
       : "Not enough data to compare.",
   };
   return context.json(result);
+});
+
+app.get("/history/:symbol", async (context) => {
+  const symbol = context.req.param("symbol").toUpperCase();
+  if (!findCompany(symbol)) return context.json({ error: "Company not found" }, 404);
+  if (!context.env?.DB) return context.json({ symbol, history: [] });
+  const limit = Number(context.req.query("limit") ?? 90);
+  try {
+    return context.json({ symbol, history: await loadCompanyHistory(context.env.DB, symbol, Number.isFinite(limit) ? limit : 90) });
+  } catch (error) {
+    console.warn(JSON.stringify({ event: "history_read_failed", symbol, error: String(error) }));
+    return context.json({ symbol, history: [] });
+  }
+});
+
+app.get("/transitions", async (context) => {
+  if (!context.env?.DB) return context.json({ transitions: [] });
+  try {
+    return context.json({ transitions: await loadRecentTransitions(context.env.DB, 50) });
+  } catch (error) {
+    console.warn(JSON.stringify({ event: "transition_read_failed", error: String(error) }));
+    return context.json({ transitions: [] });
+  }
 });
 
 app.get("/search", async (context) => {
@@ -158,7 +252,13 @@ app.post("/assistant", async (context) => {
   if (typeof body.question !== "string" || body.question.trim().length < 2) {
     return context.json({ error: "A question is required" }, 400);
   }
-  return context.json(answerQuestion(body.question.trim()));
+  const question = body.question.trim();
+  if (!context.env?.CACHE || !context.env?.AI) return context.json({ ...answerQuestion(question), mode: "deterministic" as const });
+  const enriched = await enrichKnownCompanies(context.env, backgroundWriter(context));
+  const currentCompanies = enriched.map((item) => item.company);
+  const fallback = answerQuestion(question, currentCompanies);
+  const answer = await answerWithWorkersAi(context.env.AI, question, currentCompanies, fallback);
+  return context.json(answer);
 });
 
 app.notFound((context) => context.json({ error: "API route not found" }, 404));
@@ -168,15 +268,32 @@ app.onError((error, context) => {
   return context.json({ error: "Unexpected API error", requestId: context.get("requestId") }, 500);
 });
 
-async function scheduledRefresh(env: Env): Promise<void> {
+async function scheduledRefresh(env: Env, scheduledTime: number): Promise<void> {
   const refreshedAt = new Date().toISOString();
   const writes: Promise<unknown>[] = [];
-  await Promise.all(companies.map((company) => getMarketSnapshot(env.CACHE, company.symbol, (promise) => writes.push(promise)).catch((error) => {
-    console.warn(JSON.stringify({ event: "scheduled_symbol_failed", symbol: company.symbol, error: String(error) }));
-  })));
+  const write = (promise: Promise<unknown>) => writes.push(promise);
+  const providers = evidenceProviders(env, write);
+  const selectedIndex = Math.max(0, Math.min(companies.length - 1, new Date(scheduledTime).getUTCDay() - 1));
+  const selectedSymbol = companies[selectedIndex]?.symbol;
+  const refreshedEvidence = selectedSymbol && providers.length > 0
+    ? await loadCompanyEvidence(selectedSymbol, providers)
+    : undefined;
+  const results = await Promise.all(companies.map(async (company) => {
+    try {
+      const market = await getMarketSnapshot(env.CACHE, company.symbol, write);
+      const stored = await storedEvidence(env.DB, company.symbol);
+      const evidence = refreshedEvidence?.symbol === company.symbol ? mergeEvidence(stored, refreshedEvidence) : stored;
+      const enriched = applyEvidence(enrichCompany(company, market), evidence);
+      const transitions = await persistRefresh(env.DB, enriched, market, evidence);
+      return { symbol: company.symbol, transitions: transitions.length };
+    } catch (error) {
+      console.warn(JSON.stringify({ event: "scheduled_symbol_failed", symbol: company.symbol, error: String(error) }));
+      return { symbol: company.symbol, transitions: 0 };
+    }
+  }));
   await Promise.all(writes);
   await env.CACHE.put("refresh:last-success", refreshedAt, { expirationTtl: 60 * 60 * 24 * 7 });
-  console.log(JSON.stringify({ event: "scheduled_refresh", refreshedAt, mode: "mixed" }));
+  console.log(JSON.stringify({ event: "scheduled_refresh", refreshedAt, mode: "mixed", evidenceSymbol: selectedSymbol, providers: providers.map((provider) => provider.name), results }));
 }
 
 export default {
@@ -185,7 +302,7 @@ export default {
     if (url.pathname.startsWith("/api/")) return app.fetch(request, env, ctx);
     return env.ASSETS.fetch(request);
   },
-  async scheduled(_controller, env, ctx): Promise<void> {
-    ctx.waitUntil(scheduledRefresh(env));
+  async scheduled(controller, env, ctx): Promise<void> {
+    ctx.waitUntil(scheduledRefresh(env, controller.scheduledTime));
   },
 } satisfies ExportedHandler<Env>;

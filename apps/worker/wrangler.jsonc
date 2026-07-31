@@ -24,8 +24,12 @@
       "id": "172c21756f794e2cb8483e9a8cab441d"
     }
   ],
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  },
   "triggers": {
-    "crons": ["15 12 * * 1-5"]
+    "crons": ["15 22 * * 1-5"]
   },
   "observability": {
     "enabled": true,

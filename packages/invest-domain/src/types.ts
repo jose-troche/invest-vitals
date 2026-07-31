@@ -76,6 +76,7 @@ export interface Company {
   thesisStatus: string;
   news: NewsItem[];
   marketData?: MarketDataStatus;
+  evidence?: CompanyEvidence;
 }
 
 export interface MarketDataStatus {
@@ -180,4 +181,91 @@ export interface AssistantAnswer {
   answer: string;
   highlights: Array<{ label: string; value: string }>;
   followUps: string[];
+  mode?: "ai" | "deterministic";
+  evidenceAsOf?: string;
+}
+
+export interface EvidenceProvenance {
+  source: string;
+  asOf: string;
+  fetchedAt: string;
+  status: "live" | "cached" | "fallback";
+}
+
+export interface NormalizedFundamentals {
+  symbol: string;
+  fiscalPeriod: string;
+  revenueGrowthPct?: number;
+  epsGrowthPct?: number;
+  operatingMarginPct?: number;
+  grossMarginPct?: number;
+  revenue?: number;
+  grossProfit?: number;
+  marketCapitalization?: number;
+  returnOnEquityPct?: number;
+  provenance: EvidenceProvenance;
+}
+
+export interface NormalizedEarnings {
+  symbol: string;
+  fiscalDateEnding: string;
+  reportedDate?: string;
+  reportedEps?: number;
+  estimatedEps?: number;
+  surprisePct?: number;
+  provenance: EvidenceProvenance;
+}
+
+export interface NormalizedSecFiling {
+  symbol: string;
+  accessionNumber: string;
+  form: string;
+  filedAt: string;
+  reportDate?: string;
+  primaryDocument: string;
+  url: string;
+  provenance: EvidenceProvenance;
+}
+
+export interface NormalizedNewsItem {
+  id: string;
+  symbol: string;
+  title: string;
+  url: string;
+  source: string;
+  publishedAt: string;
+  summary: string;
+  sentiment?: number;
+  provenance: EvidenceProvenance;
+}
+
+export interface CompanyEvidence {
+  symbol: string;
+  fundamentals?: NormalizedFundamentals;
+  earnings: NormalizedEarnings[];
+  filings: NormalizedSecFiling[];
+  news: NormalizedNewsItem[];
+}
+
+export interface AlertTransition {
+  id: string;
+  symbol: string;
+  transitionType: "health-label" | "health-score" | "momentum" | "fundamental";
+  severity: "attention" | "watch" | "positive";
+  title: string;
+  reason: string;
+  previousValue?: string;
+  currentValue: string;
+  evidenceAsOf: string;
+  createdAt: string;
+}
+
+export interface CompanyHistoryPoint {
+  observedAt: string;
+  price: number;
+  dayChangePct: number;
+  health: number;
+  healthLabel: HealthLabel;
+  momentumScore: number;
+  source: string;
 }

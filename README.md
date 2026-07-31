@@ -2,7 +2,7 @@
 
 Invest Vitals is a calm, evidence-first dashboard for long-term investors. It combines performance, fundamentals, valuation, momentum, thesis evidence, and material news to answer one question quickly: **is this investment becoming stronger or weaker?**
 
-The v1 is a working, responsive product with a transparent health model, live or cached market prices and return history, a browser-persisted watchlist, company comparisons, thesis-aware alerts, and a deterministic analyst assistant. Baseline fundamentals, valuation, thesis, and news are clearly distinguished from fresh market data.
+The v1 is a working, responsive product with a transparent health model, live or cached market prices and return history, normalized primary evidence, a browser-persisted watchlist, company comparisons, persisted material alerts, and a validated Workers AI assistant with a deterministic fallback.
 
 ## Monorepo
 
@@ -53,13 +53,23 @@ cd apps/worker
 npx wrangler d1 migrations apply invest-vitals-db --local
 ```
 
+Primary evidence is optional. Without these secrets, the app continues using persisted evidence and clearly labeled baselines:
+
+```bash
+cd apps/worker
+npx wrangler secret put ALPHA_VANTAGE_API_KEY
+npx wrangler secret put SEC_USER_AGENT
+```
+
+For local provider work, copy `apps/worker/.dev.vars.example` to `apps/worker/.dev.vars` and fill in the values. `SEC_USER_AGENT` must contain an honest application identifier and monitored contact address. Alpha Vantage supplies normalized fundamentals, earnings, and news; SEC EDGAR supplies filing evidence. The weekday job rotates one company per run to stay conservative with provider quotas.
+
 ## Data and product boundaries
 
 - Scores are weighted and fully visible; they are not a black box.
-- The assistant is deterministic and grounded in the same visible evidence. It never predicts prices or emits buy/sell calls.
+- Workers AI receives only normalized evidence and must return a schema-validated answer. Invalid, unavailable, or unsafe responses fall back to the deterministic assistant.
 - Prices and adjusted return history come from Yahoo Finance's unofficial chart endpoints and are cached for 15 minutes. Provider failures are shown using the clearly labeled baseline fallback.
-- Fundamentals, valuation, thesis, news, and holding quantities remain baseline fixtures; the UI labels the resulting dataset as mixed.
-- D1 tables cover portfolios, holdings, watchlists, price history, earnings, news, alerts, theses, and summaries for future authenticated accounts.
+- Fundamentals, earnings, SEC filings, and news use persisted primary evidence when configured. Valuation, thesis, and holding quantities remain baseline fixtures and are labeled accordingly.
+- D1 stores normalized provider evidence, market/health history, and material alert transitions in addition to the future account tables. Anonymous assistant questions and answers are not persisted.
 - KV is reserved for provider-response caching; cron is configured for weekday refresh orchestration.
 
-See [architecture.md](docs/architecture.md) for the extension path to live providers, Workers AI, and account sync.
+See [architecture.md](docs/architecture.md) for the data pipeline and the remaining account-sync extension.

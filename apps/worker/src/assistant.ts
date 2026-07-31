@@ -2,6 +2,7 @@ import { companies, findCompany, type AssistantAnswer, type Company } from "@inv
 
 function companyAnswer(company: Company): AssistantAnswer {
   const weakest = [...company.healthComponents].sort((a, b) => a.score - b.score)[0];
+  const comparisonSymbol = company.symbol === "MSFT" ? "GOOGL" : "MSFT";
   return {
     answer: `${company.name} is currently ${company.healthLabel.toLowerCase()} at ${company.health}/100. ${company.keyChange} ${company.aiSummary.at(-1) ?? ""}`,
     highlights: [
@@ -12,19 +13,21 @@ function companyAnswer(company: Company): AssistantAnswer {
     followUps: [
       `What changed for ${company.symbol}?`,
       `Is ${company.symbol}'s thesis intact?`,
-      `Compare ${company.symbol} and MSFT`,
+      `Compare ${company.symbol} and ${comparisonSymbol}`,
     ],
   };
 }
 
-export function answerQuestion(question: string): AssistantAnswer {
+export function answerQuestion(question: string, sourceCompanies: Company[] = companies): AssistantAnswer {
   const normalized = question.toUpperCase();
-  const mentioned = companies.filter(
+  const mentioned = sourceCompanies.filter(
     (company) => normalized.includes(company.symbol) || normalized.includes(company.name.toUpperCase()),
   );
 
+  if (mentioned.length === 1 && !/COMPARE|VERSUS| VS /.test(normalized)) return companyAnswer(mentioned[0]!);
+
   if (/WORR|CONCERN|ATTENTION|WEAK/.test(normalized)) {
-    const concern = [...companies].sort((a, b) => a.health - b.health)[0];
+    const concern = [...sourceCompanies].sort((a, b) => a.health - b.health)[0];
     if (concern) {
       return {
         answer: `${concern.name} deserves the most attention. Its health score is ${concern.health}/100 and ${concern.momentum.toLowerCase()}. ${concern.keyChange} This is a review signal, not a prediction or a buy/sell recommendation.`,
@@ -39,7 +42,7 @@ export function answerQuestion(question: string): AssistantAnswer {
   }
 
   if (/STRONG|HEALTHIEST|BEST/.test(normalized)) {
-    const strongest = [...companies].sort((a, b) => b.health - a.health)[0];
+    const strongest = [...sourceCompanies].sort((a, b) => b.health - a.health)[0];
     if (strongest) return companyAnswer(strongest);
   }
 
@@ -60,15 +63,19 @@ export function answerQuestion(question: string): AssistantAnswer {
     }
   }
 
-  const direct = mentioned[0] ?? (normalized.match(/[A-Z]{2,5}/)?.[0] ? findCompany(normalized.match(/[A-Z]{2,5}/)?.[0] ?? "") : undefined);
+  const matchedSymbol = normalized.match(/[A-Z]{2,5}/)?.[0];
+  const direct = mentioned[0] ?? (matchedSymbol ? sourceCompanies.find((company) => company.symbol === matchedSymbol) ?? findCompany(matchedSymbol) : undefined);
   if (direct) return companyAnswer(direct);
 
+  const averageHealth = Math.round(sourceCompanies.reduce((sum, company) => sum + company.health, 0) / Math.max(1, sourceCompanies.length));
+  const strongest = [...sourceCompanies].sort((a, b) => b.health - a.health)[0];
+  const concern = [...sourceCompanies].sort((a, b) => a.health - b.health)[0];
   return {
-    answer: "Your portfolio is healthy overall, but the signal is mixed. Microsoft and Meta have the strongest combination of fundamentals and momentum. Apple and Amazon deserve attention because recent growth and momentum weakened. I explain current evidence only—I do not predict prices or issue buy/sell calls.",
+    answer: `Your portfolio averages ${averageHealth}/100 health, but the signal is mixed. ${strongest?.name ?? "The strongest holding"} has the strongest current health profile. ${concern?.name ?? "The weakest holding"} deserves the closest review. I explain current evidence only—I do not predict prices or issue buy/sell calls.`,
     highlights: [
-      { label: "Average health", value: "83/100" },
-      { label: "Strongest", value: "MSFT · 92" },
-      { label: "Needs attention", value: "AAPL · 69" },
+      { label: "Average health", value: `${averageHealth}/100` },
+      { label: "Strongest", value: strongest ? `${strongest.symbol} · ${strongest.health}` : "Unavailable" },
+      { label: "Needs attention", value: concern ? `${concern.symbol} · ${concern.health}` : "Unavailable" },
     ],
     followUps: ["Which holding worries you?", "Why did AAPL health fall?", "Compare MSFT and GOOGL"],
   };

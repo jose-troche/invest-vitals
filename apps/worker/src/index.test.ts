@@ -29,8 +29,16 @@ describe("Invest Vitals API", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ question: "Which holding worries you?" }),
     });
-    const body = await response.json() as { answer: string };
+    const body = await response.json() as { answer: string; mode: string };
     expect(response.status).toBe(200);
     expect(body.answer).toContain("Apple");
+    expect(body.mode).toBe("deterministic");
+  });
+
+  it("exposes empty history contracts without local bindings", async () => {
+    const history = await (await app.request("/api/history/MSFT")).json() as { symbol: string; history: unknown[] };
+    const transitions = await (await app.request("/api/transitions")).json() as { transitions: unknown[] };
+    expect(history).toEqual({ symbol: "MSFT", history: [] });
+    expect(transitions).toEqual({ transitions: [] });
   });
 });
